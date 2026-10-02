@@ -819,7 +819,7 @@
             <h1 class="store-name">CENTRAL <span>RAÇÕES</span></h1>
             <p class="store-slogan">Cuidado e nutrição para quem faz parte da família.</p>
             
-            <a href="https://www.instagram.com/central__racoes_/" id="topWhatsappBtn" target="_blank" rel="noopener noreferrer" class="btn-whatsapp-top">
+            <a href="https://wa.me/5586994203794" id="topWhatsappBtn" target="_blank" rel="noopener noreferrer" class="btn-whatsapp-top">
                 <i class="fa-brands fa-instagram"></i> FALAR NO INSTAGRAM
             </a>
 
@@ -924,14 +924,14 @@
         <p style="font-size: 0.8rem; color: var(--text-gray); margin-top: 7px;"><i class="fa-solid fa-location-dot" style="color: var(--accent-gold);"></i> Dentro do Posto Mais, em Lagoa do Piauí – PI.</p>
 
         <div style="margin: 15px 0;">
-            <a href="https://www.instagram.com/central__racoes_/" id="footerWhatsappBtn" target="_blank" rel="noopener noreferrer" class="btn-whatsapp-top" style="padding: 10px 20px; font-size: 0.85rem;">
+            <a href="https://wa.me/5586994203794" id="footerWhatsappBtn" target="_blank" rel="noopener noreferrer" class="btn-whatsapp-top" style="padding: 10px 20px; font-size: 0.85rem;">
                 <i class="fa-brands fa-instagram"></i> FALAR NO INSTAGRAM
             </a>
         </div>
 
         <div class="social-links">
             <a href="https://www.instagram.com/central__racoes_/" target="_blank" rel="noopener noreferrer" class="social-btn" aria-label="Instagram da Central"><i class="fa-brands fa-instagram"></i></a>
-            <a href="#" id="socialWa" target="_blank" class="social-btn"><i class="fa-brands fa-whatsapp"></i></a>
+            <a href="https://wa.me/5586994203794" id="socialWa" target="_blank" class="social-btn"><i class="fa-brands fa-whatsapp"></i></a>
             <a href="https://www.google.com/maps/search/?api=1&amp;query=Posto+Mais+Lagoa+do+Piaui+PI" target="_blank" rel="noopener noreferrer" class="social-btn" aria-label="Localização da Central"><i class="fa-solid fa-location-dot"></i></a>
         </div>
 
@@ -1009,8 +1009,8 @@
                 <div class="form-group" style="background-color: var(--bg-input); padding: 10px; border-radius: 8px;">
                     <label><i class="fa-brands fa-whatsapp"></i> Número do WhatsApp (com DDD)</label>
                     <div style="display:flex; gap:10px;">
-                        <input type="text" id="cfgWhatsapp" class="form-control" placeholder="Informe o número com DDD">
-                        <button class="btn-interest" style="width: auto; padding: 0 15px;" onclick="saveConfig()">Salvar</button>
+                        <input type="text" id="cfgWhatsapp" class="form-control" placeholder="(86) 99420-3794" inputmode="tel">
+                        <button class="btn-interest" style="width: auto; padding: 0 15px;" id="saveWhatsappBtn" type="button" onclick="saveConfig()">Salvar</button>
                     </div>
                 </div>
 
@@ -1139,14 +1139,27 @@
         const db = firebase.firestore();
         const auth = firebase.auth();
 
-        const DEFAULT_WHATSAPP = "5586994038567";
+        const DEFAULT_WHATSAPP = "5586994203794";
         const INSTAGRAM_URL = "https://www.instagram.com/central__racoes_/";
         
         let products = [];
         const defaultCategories = ['Cães', 'Gatos', 'Aves', 'Outros animais', 'Petiscos', 'Higiene', 'Acessórios'];
         let categories = defaultCategories.slice();
         const categoriesDoc = db.collection('configuracoes').doc('categorias');
-        let whatsappNum = localStorage.getItem('central_whatsapp_v2') || DEFAULT_WHATSAPP;
+        const WHATSAPP_CACHE_KEY = 'central_whatsapp_v3';
+        function normalizeWhatsapp(value) {
+            let digits = String(value || '').replace(/\D/g, '');
+            if (digits.length === 10 || digits.length === 11) digits = '55' + digits;
+            return /^55[1-9]\d{9,10}$/.test(digits) ? digits : null;
+        }
+        let whatsappNum = normalizeWhatsapp(localStorage.getItem(WHATSAPP_CACHE_KEY)) || DEFAULT_WHATSAPP;
+        const whatsappDoc = db.collection('configuracoes').doc('contatoWhatsapp');
+        function applyWhatsapp(number) {
+            whatsappNum = number;
+            try { localStorage.setItem(WHATSAPP_CACHE_KEY, number); } catch (error) { console.warn('Contato sem cache local.', error); }
+            updateWhatsappLinks();
+            document.getElementById('cfgWhatsapp').value = number;
+        }
         let currentSort = localStorage.getItem('centralracoes_sort') || 'recent';
         let cart = JSON.parse(localStorage.getItem('centralracoes_cart')) || [];
         let activeCategory = 'Todos';
@@ -1222,6 +1235,15 @@
             }, error => { document.getElementById('tabsStatus').textContent = 'Erro ao carregar abas: ' + error.message; });
             updateWhatsappLinks();
             document.getElementById('cfgWhatsapp').value = whatsappNum;
+            document.getElementById('cfgWhatsapp').addEventListener('keydown', event => {
+                if (event.key === 'Enter') { event.preventDefault(); saveConfig(); }
+            });
+            whatsappDoc.onSnapshot(snapshot => {
+                const number = snapshot.exists ? normalizeWhatsapp(snapshot.data().numero) : null;
+                applyWhatsapp(number || DEFAULT_WHATSAPP);
+            }, error => {
+                console.error('Não foi possível carregar o contato compartilhado.', error);
+            });
             document.getElementById('cfgSort').value = currentSort;
             
             document.getElementById('searchInput').addEventListener('input', (e) => {
@@ -1729,14 +1751,23 @@
             }
         });
 
-        function saveConfig() {
-            const newWa = document.getElementById('cfgWhatsapp').value.trim();
-            if (newWa) {
-                whatsappNum = newWa;
-                localStorage.setItem('central_whatsapp_v2', whatsappNum);
-                updateWhatsappLinks();
-                renderCatalog();
-                alert('Configurações salvas!');
+        async function saveConfig() {
+            const number = normalizeWhatsapp(document.getElementById('cfgWhatsapp').value);
+            if (!number) { alert('Informe um número válido com DDD, como (86) 99420-3794.'); return; }
+            if (!auth.currentUser) { alert('Entre no painel para salvar o número para todos os clientes.'); return; }
+            const button = document.getElementById('saveWhatsappBtn');
+            if (button.disabled) return;
+            button.disabled = true;
+            button.textContent = 'Salvando…';
+            try {
+                await whatsappDoc.set({ numero: number }, { merge: true });
+                applyWhatsapp(number);
+                alert('WhatsApp atualizado para todos os clientes!');
+            } catch (error) {
+                alert('Não foi possível salvar o WhatsApp no banco de dados: ' + error.message);
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Salvar';
             }
         }
 
